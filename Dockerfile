@@ -7,9 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir \
-       "tender-contracts @ git+https://github.com/keedio-tender-radar/tender-shared-contracts.git"
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
