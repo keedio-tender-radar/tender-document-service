@@ -1,0 +1,10 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+httpx>=0.27
+pydantic>=2.6
+pydantic-settings>=2.5
+pypdf>=4.0
+python-docx>=1.1
+openpyxl>=3.1
+# Almacenamiento de objetos (opcional): descomenta si usas S3/InsForge Storage.
+# boto3>=1.34
