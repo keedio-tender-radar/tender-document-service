@@ -15,6 +15,11 @@ _DOC_HINTS = (
     "pliego", "pcap", "ppt", "prescripciones", "clausulas", "cláusulas", "anexo",
     "memoria", "documento", "bases", "caracteristicas", "características",
 )
+# Pistas de página intermedia (perfil del contratante / plataforma) a la que saltar (HTML→PDF).
+_PROFILE_HINTS = (
+    "perfil", "contratante", "contractant", "licitaci", "expedient", "perfils-contractant",
+    "contrataciondelestado", "contractaciopublica", "plataforma",
+)
 
 
 class _TextExtractor(HTMLParser):
@@ -77,6 +82,29 @@ def find_document_links(data: bytes, base_url: str) -> list[str]:
         is_doc = href.lower().split("?", 1)[0].endswith(_DOC_EXT)
         is_hint = any(h in low for h in _DOC_HINTS)
         if not (is_doc or is_hint):
+            continue
+        absu = urljoin(base_url, href)
+        if absu not in seen:
+            seen.add(absu)
+            out.append(absu)
+    return out
+
+
+def find_profile_links(data: bytes, base_url: str) -> list[str]:
+    """Enlaces a páginas intermedias (perfil del contratante/plataforma) para saltar HTML→PDF.
+
+    Útil en TED: el anuncio no enlaza el PDF directamente, sino el perfil del comprador donde
+    están los documentos. Devuelve URLs absolutas, sin duplicados.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for href, label in _parse(data).links:
+        if not href or href.startswith(("#", "mailto:", "javascript:")):
+            continue
+        if href.lower().split("?", 1)[0].endswith(_DOC_EXT):
+            continue  # eso es un documento directo, no una página intermedia
+        low = f"{href} {label}".lower()
+        if not any(h in low for h in _PROFILE_HINTS):
             continue
         absu = urljoin(base_url, href)
         if absu not in seen:

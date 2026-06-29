@@ -74,24 +74,58 @@ def extract(payload: ExtractRequest) -> ExtractResponse:
     )
 
 
+def _extract_doc(downloader: DocumentDownloader, url: str) -> str | None:
+    """Descarga y extrae un PDF/DOCX. Devuelve su texto o None si no es documento/falla."""
+    try:
+        d, ct = downloader.download(url)
+    except DownloadError:
+        return None
+    if dispatch.detect_kind(url.rsplit("/", 1)[-1].split("?", 1)[0], ct) not in ("pdf", "docx"):
+        return None
+    try:
+        return f"--- Documento: {url} ---\n{dispatch.extract(d, content_type=ct)}"
+    except ValueError:
+        return None
+
+
 def _follow_pliego_documents(
     base_url: str, html_bytes: bytes, max_documents: int
 ) -> tuple[int, str]:
-    """Descarga y extrae hasta max_documents enlazados en el anuncio. Best-effort, no fatal."""
-    links = html_extractor.find_document_links(html_bytes, base_url)[: max(0, max_documents)]
+    """Sigue los documentos del expediente desde el anuncio. Best-effort, no fatal.
+
+    Nivel 1: PDFs/DOCX enlazados directamente. Si no hay (típico en TED), salto HTML→PDF: sigue
+    el enlace al perfil del contratante/plataforma y extrae los documentos de ahí.
+    """
     downloader = DocumentDownloader()
     parts: list[str] = []
-    followed = 0
-    for link in links:
-        try:
-            d, ct = downloader.download(link)
-            k = dispatch.detect_kind(link.rsplit("/", 1)[-1], ct)
-            if k in ("pdf", "docx"):  # solo documentos con requisitos; evita recursión HTML
-                parts.append(f"--- Documento: {link} ---\n{dispatch.extract(d, content_type=ct)}")
-                followed += 1
-        except (DownloadError, ValueError):
-            continue
-    return followed, "\n\n".join(parts)
+    budget = max(0, max_documents)
+
+    for link in html_extractor.find_document_links(html_bytes, base_url):
+        if len(parts) >= budget:
+            break
+        txt = _extract_doc(downloader, link)
+        if txt:
+            parts.append(txt)
+
+    # Sin documentos directos (típico TED): salta a la página intermedia (perfil) y busca allí.
+    if not parts:
+        for profile_url in html_extractor.find_profile_links(html_bytes, base_url)[:2]:
+            if len(parts) >= budget:
+                break
+            try:
+                pdata, pct = downloader.download(profile_url)
+            except DownloadError:
+                continue
+            if dispatch.detect_kind(None, pct) != "html":
+                continue
+            for link in html_extractor.find_document_links(pdata, profile_url):
+                if len(parts) >= budget:
+                    break
+                txt = _extract_doc(downloader, link)
+                if txt:
+                    parts.append(txt)
+
+    return len(parts), "\n\n".join(parts)
 
 
 @app.post("/process", response_model=ProcessResponse)
