@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from tender_documents.chunking import chunker
 from tender_documents.config import settings
 from tender_documents.downloaders.document_downloader import DocumentDownloader, DownloadError
-from tender_documents.extractors import dispatch
+from tender_documents.extractors import dispatch, html_extractor
 from tender_documents.jobs.process_documents import process_documents
 from tender_documents.schemas import (
     Chunk,
@@ -55,13 +55,43 @@ def extract(payload: ExtractRequest) -> ExtractResponse:
         raise HTTPException(415, "Tipo de documento no soportado (usa pdf/docx/xlsx/html).")
 
     text = dispatch.extract(data, filename=filename, content_type=content_type)
+
+    # #1: si es el HTML del anuncio, seguir los enlaces a los documentos del pliego y anexar
+    # su texto (PCAP/PPT/anexos). Es donde están los requisitos reales, no en el anuncio.
+    followed = 0
+    if kind == "html" and payload.url and payload.follow_documents:
+        followed, doc_text = _follow_pliego_documents(payload.url, data, payload.max_documents)
+        if doc_text:
+            text = f"{text}\n\n{doc_text}"
+
     chunks = chunker.chunk_document(text, size=settings.chunk_size, overlap=settings.chunk_overlap)
     return ExtractResponse(
         kind=kind,
         char_count=len(text),
         chunk_count=len(chunks),
         chunks=[Chunk(**c) for c in chunks],
+        documents_followed=followed,
     )
+
+
+def _follow_pliego_documents(
+    base_url: str, html_bytes: bytes, max_documents: int
+) -> tuple[int, str]:
+    """Descarga y extrae hasta max_documents enlazados en el anuncio. Best-effort, no fatal."""
+    links = html_extractor.find_document_links(html_bytes, base_url)[: max(0, max_documents)]
+    downloader = DocumentDownloader()
+    parts: list[str] = []
+    followed = 0
+    for link in links:
+        try:
+            d, ct = downloader.download(link)
+            k = dispatch.detect_kind(link.rsplit("/", 1)[-1], ct)
+            if k in ("pdf", "docx"):  # solo documentos con requisitos; evita recursión HTML
+                parts.append(f"--- Documento: {link} ---\n{dispatch.extract(d, content_type=ct)}")
+                followed += 1
+        except (DownloadError, ValueError):
+            continue
+    return followed, "\n\n".join(parts)
 
 
 @app.post("/process", response_model=ProcessResponse)
