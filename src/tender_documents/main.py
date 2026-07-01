@@ -96,20 +96,22 @@ def _follow_pliego_documents(
     Nivel 1: PDFs/DOCX enlazados directamente. Si no hay (típico en TED), salto HTML→PDF: sigue
     el enlace al perfil del contratante/plataforma y extrae los documentos de ahí.
     """
-    downloader = DocumentDownloader()
+    # Timeout corto en el seguimiento: nunca debe ralentizar el pipeline (los perfiles SPA no
+    # exponen PDFs en el HTML crudo y solo añadirían latencia → fail-fast).
+    downloader = DocumentDownloader(timeout=15.0)
     parts: list[str] = []
     budget = max(0, max_documents)
 
-    for link in html_extractor.find_document_links(html_bytes, base_url):
+    for link in html_extractor.find_document_links(html_bytes, base_url)[: budget + 2]:
         if len(parts) >= budget:
             break
         txt = _extract_doc(downloader, link)
         if txt:
             parts.append(txt)
 
-    # Sin documentos directos (típico TED): salta a la página intermedia (perfil) y busca allí.
+    # Sin documentos directos (típico TED): salta a UNA página intermedia (perfil) y busca allí.
     if not parts:
-        for profile_url in html_extractor.find_profile_links(html_bytes, base_url)[:2]:
+        for profile_url in html_extractor.find_profile_links(html_bytes, base_url)[:1]:
             if len(parts) >= budget:
                 break
             try:
