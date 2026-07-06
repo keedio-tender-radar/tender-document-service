@@ -41,6 +41,18 @@ def test_pdf_extract():
     assert "plataforma de datos" in text.lower()
 
 
+def test_pdf_scanned_degrades_safely():
+    # PDF sin texto embebido (simula escaneo): sin Tesseract, el OCR degrada a "" sin romper.
+    fitz = pytest.importorskip("fitz")
+    from tender_documents.extractors import pdf_extractor
+
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    assert isinstance(pdf_extractor.extract(data), str)  # no lanza excepción
+
+
 def test_dispatch_by_extension(html_bytes):
     assert dispatch.detect_kind("pliego.pdf", None) == "pdf"
     assert dispatch.detect_kind("a.docx", None) == "docx"
